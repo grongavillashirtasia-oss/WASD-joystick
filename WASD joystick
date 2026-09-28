@@ -1,0 +1,266 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerScripts = player:WaitForChild("PlayerScripts")
+local playerGui = player:WaitForChild("PlayerGui")
+
+--==================================================
+-- DISABLE ROBLOX DEFAULT CONTROLS
+--==================================================
+
+local PlayerModule = require(playerScripts:WaitForChild("PlayerModule"))
+local Controls = PlayerModule:GetControls()
+Controls:Disable()
+
+--==================================================
+-- GUI
+--==================================================
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "CustomJoystick"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.Parent = playerGui
+
+--==================================================
+-- JOYSTICK BASE
+--==================================================
+
+local base = Instance.new("Frame")
+base.Name = "JoystickBase"
+base.Size = UDim2.fromOffset(120, 120)
+base.AnchorPoint = Vector2.new(0, 1)
+base.Position = UDim2.new(0, 35, 1, -35)
+
+base.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+base.BackgroundTransparency = 0.7
+base.BorderSizePixel = 0
+base.Active = true
+base.Parent = gui
+
+local baseCorner = Instance.new("UICorner")
+baseCorner.CornerRadius = UDim.new(1, 0)
+baseCorner.Parent = base
+
+--==================================================
+-- WHITE LINE
+--==================================================
+
+local line = Instance.new("Frame")
+line.Name = "JoystickLine"
+line.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+line.BackgroundTransparency = 0.15
+line.BorderSizePixel = 0
+line.AnchorPoint = Vector2.new(0, 0.5)
+line.Visible = false
+line.ZIndex = 1
+line.Parent = gui
+
+local lineCorner = Instance.new("UICorner")
+lineCorner.CornerRadius = UDim.new(1, 0)
+lineCorner.Parent = line
+
+--==================================================
+-- WHITE THUMB
+--==================================================
+
+local thumb = Instance.new("Frame")
+thumb.Name = "Thumb"
+thumb.Size = UDim2.fromOffset(55, 55)
+thumb.AnchorPoint = Vector2.new(0.5, 0.5)
+
+thumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+thumb.BackgroundTransparency = 0.15
+thumb.BorderSizePixel = 0
+thumb.ZIndex = 2
+thumb.Parent = gui
+
+local thumbCorner = Instance.new("UICorner")
+thumbCorner.CornerRadius = UDim.new(1, 0)
+thumbCorner.Parent = thumb
+
+--==================================================
+-- VARIABLES
+--==================================================
+
+local activeTouch = nil
+local dragging = false
+local moveVector = Vector2.zero
+
+--==================================================
+-- GET JOYSTICK CENTER
+--==================================================
+
+local function getCenter()
+	return base.AbsolutePosition + base.AbsoluteSize / 2
+end
+
+--==================================================
+-- UPDATE JOYSTICK
+--==================================================
+
+local function updateJoystick(position)
+
+	local center = getCenter()
+
+	-- Actual distance from joystick center
+	local offset = Vector2.new(position.X, position.Y) - center
+
+	local maxDistance =
+		(base.AbsoluteSize.X - thumb.AbsoluteSize.X) / 2
+
+	-- Movement direction is limited to the joystick's range
+	local movementOffset = offset
+
+	if movementOffset.Magnitude > maxDistance then
+		movementOffset = movementOffset.Unit * maxDistance
+	end
+
+	--==============================================
+	-- WHITE THUMB FOLLOWS ACTUAL FINGER
+	--==============================================
+
+	thumb.Position = UDim2.fromOffset(
+		position.X,
+		position.Y
+	)
+
+	--==============================================
+	-- WHITE LINE
+	--==============================================
+
+	local distance = offset.Magnitude
+
+	if distance > 1 then
+
+		line.Visible = true
+
+		line.Position = UDim2.fromOffset(
+			center.X,
+			center.Y
+		)
+
+		line.Size = UDim2.fromOffset(
+			distance,
+			6
+		)
+
+		line.Rotation = math.deg(
+			math.atan2(offset.Y, offset.X)
+		)
+
+	else
+		line.Visible = false
+	end
+
+	--==============================================
+	-- MOVEMENT VECTOR
+	--==============================================
+
+	if offset.Magnitude > 0 then
+
+		local normalized = offset.Unit
+
+		moveVector = Vector2.new(
+			normalized.X *
+				math.min(offset.Magnitude / maxDistance, 1),
+
+			-normalized.Y *
+				math.min(offset.Magnitude / maxDistance, 1)
+		)
+
+	else
+		moveVector = Vector2.zero
+	end
+end
+
+--==================================================
+-- RELEASE
+--==================================================
+
+local function releaseJoystick()
+
+	activeTouch = nil
+	dragging = false
+	moveVector = Vector2.zero
+
+	thumb.Position = UDim2.fromOffset(
+		getCenter().X,
+		getCenter().Y
+	)
+
+	line.Visible = false
+end
+
+--==================================================
+-- START TOUCH
+--==================================================
+
+base.InputBegan:Connect(function(input)
+
+	if input.UserInputType == Enum.UserInputType.Touch then
+
+		-- Ignore additional fingers
+		if activeTouch ~= nil then
+			return
+		end
+
+		activeTouch = input
+		dragging = true
+
+		updateJoystick(input.Position)
+
+	elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+
+		if activeTouch ~= nil then
+			return
+		end
+
+		activeTouch = input
+		dragging = true
+
+		updateJoystick(input.Position)
+	end
+end)
+
+--==================================================
+-- TRACK ORIGINAL TOUCH ANYWHERE
+--==================================================
+
+UserInputService.TouchMoved:Connect(function(input)
+
+	if input == activeTouch then
+		updateJoystick(input.Position)
+	end
+end)
+
+--==================================================
+-- RELEASE ORIGINAL TOUCH
+--==================================================
+
+UserInputService.InputEnded:Connect(function(input)
+
+	if input == activeTouch then
+		releaseJoystick()
+	end
+end)
+
+--==================================================
+-- W / A / S / D MOVEMENT
+--==================================================
+
+RunService.RenderStepped:Connect(function()
+
+	local character = player.Character
+
+	if not character then
+		return
+	end
+
+	local humanoid =
+		character:FindFirstChildOfClass("Humanoid")
+
+	if not humanoid then
+		return
